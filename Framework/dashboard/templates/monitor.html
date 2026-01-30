@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Monitor: {{ patient_id }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <a href="/" style="text-decoration: none; color: inherit;">
+                    <h1>Medi<span class="highlight">Secure</span> IoT</h1>
+                </a>
+                <p>Monitoring: <strong style="color: var(--accent-color);">{{ patient_id }}</strong></p>
+            </div>
+            <div class="status-indicator">
+                <span id="connection-status" class="status disconnected">Disconnected</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Vital Signs Grid -->
+            <div class="vitals-grid">
+                <div class="card vital-card">
+                    <div class="icon">❤️</div>
+                    <div class="vital-info">
+                        <h3>Heart Rate</h3>
+                        <div class="value-unit">
+                            <span id="hr-value" class="value">--</span>
+                            <span class="unit">BPM</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card vital-card">
+                    <div class="icon">💧</div>
+                    <div class="vital-info">
+                        <h3>SpO2</h3>
+                        <div class="value-unit">
+                            <span id="spo2-value" class="value">--</span>
+                            <span class="unit">%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card vital-card">
+                    <div class="icon">🌡️</div>
+                    <div class="vital-info">
+                        <h3>Temperature</h3>
+                        <div class="value-unit">
+                            <span id="temp-value" class="value">--</span>
+                            <span class="unit">°C</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card vital-card">
+                    <div class="icon">☁️</div>
+                    <div class="vital-info">
+                        <h3>Humidity</h3>
+                        <div class="value-unit">
+                            <span id="hum-value" class="value">--</span>
+                            <span class="unit">%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ECG Chart -->
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h2>Real-time ECG</h2>
+                    <div class="live-badge">LIVE</div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="ecgChart"></canvas>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const PATIENT_ID = "{{ patient_id }}";
+    </script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

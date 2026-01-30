@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Nurse Station{% endblock %}
+{% block subtitle %}Central Monitoring Unit{% endblock %}
+
+{% block content %}
+<h2 class="section-title">Active Monitoring</h2>
+<div id="patient-grid" class="vitals-grid">
+    <div class="card empty-state">
+        <p>Waiting for devices to connect...</p>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    const patientGrid = document.getElementById('patient-grid');
+
+    // Maintain a local state of patients to update UI efficiently
+    let activePatients = {};
+
+    socket.on('station_update', (msg) => {
+        // msg contains {patient_id, data, last_seen}
+        const pid = msg.patient_id;
+        activePatients[pid] = msg;
+        renderGrid();
+    });
+
+    function renderGrid() {
+        if (Object.keys(activePatients).length === 0) return;
+
+        patientGrid.innerHTML = '';
+
+        for (const [pid, info] of Object.entries(activePatients)) {
+            const data = info.data;
+            // Simple online check (client-side approximation)
+            const isOnline = true;
+
+            const card = document.createElement('a');
+            card.href = `/monitor/${pid}`;
+            card.className = `card patient-summary-card ${isOnline ? '' : 'offline'}`;
+            card.innerHTML = `
+                <div class="patient-header">
+                    <h3>${pid}</h3>
+                    <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+                </div>
+                <div class="patient-vitals">
+                    <div class="vital-item">
+                        <span class="label">HR</span>
+                        <span class="val">${data.hr || '--'}</span>
+                    </div>
+                    <div class="vital-item">
+                        <span class="label">SpO2</span>
+                        <span class="val">${data.spo2 || '--'}%</span>
+                    </div>
+                    <div class="vital-item">
+                        <span class="label">Temp</span>
+                        <span class="val">${data.temp || '--'}°C</span>
+                    </div>
+                </div>
+            `;
+            patientGrid.appendChild(card);
+        }
+    }
+</script>
+<style>
+    .section-title {
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+    }
+
+    .patient-summary-card {
+        text-decoration: none;
+        color: inherit;
+        display: block;
+        cursor: pointer;
+        border: 1px solid rgba(56, 189, 248, 0.1);
+    }
+
+    .patient-summary-card:hover {
+        border-color: var(--accent-color);
+    }
+
+    .patient-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        padding-bottom: 0.5rem;
+    }
+
+    .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--text-secondary);
+    }
+
+    .status-dot.online {
+        background: var(--success-color);
+        box-shadow: 0 0 10px var(--success-color);
+    }
+
+    .patient-vitals {
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .vital-item {
+        text-align: center;
+    }
+
+    .vital-item .label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .vital-item .val {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+
+    .offline {
+        opacity: 0.6;
+    }
+</style>
+{% endblock %}

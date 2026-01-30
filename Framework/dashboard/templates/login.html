@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Login | MediSecure{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="card login-card">
+        <h2>System Access</h2>
+        <form method="POST" action="/login">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="username" required placeholder="e.g., doctor, nurse, patient_alpha">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" required placeholder="system password">
+            </div>
+            <button type="submit" class="btn-login">Login</button>
+        </form>
+        <div class="login-help">
+            <p>Don't have an account? <a href="{{ url_for('signup') }}"
+                    style="color: var(--accent-color); text-decoration: none;">Create Account</a></p>
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;">
+            <p><strong>Demo Credentials:</strong></p>
+            <ul>
+                <li>Doctor: doctor / doctor123</li>
+                <li>Nurse: nurse / nurse123</li>
+                <li>Patient: patient_alpha / patient123</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<style>
+    .login-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 60vh;
+    }
+
+    .login-card {
+        width: 100%;
+        max-width: 400px;
+        padding: 2rem;
+    }
+
+    .login-card h2 {
+        text-align: center;
+        margin-bottom: 2rem;
+        color: var(--accent-color);
+    }
+
+    .login-help {
+        margin-top: 2rem;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        background: rgba(0, 0, 0, 0.2);
+        padding: 1rem;
+        border-radius: 8px;
+    }
+
+    .login-help ul {
+        padding-left: 1.2rem;
+        margin-top: 0.5rem;
+    }
+</style>
+{% endblock %}

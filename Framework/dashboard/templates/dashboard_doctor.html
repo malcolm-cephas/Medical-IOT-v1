@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Doctor Dashboard{% endblock %}
+{% block subtitle %}Physician Portal{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <div class="card sidebar">
+        <h3>Patient Directory</h3>
+        <ul class="patient-list">
+            {% for patient in patients %}
+            <li>
+                <a href="{{ url_for('monitor_patient', patient_id=patient.username) }}" class="patient-link">
+                    <span class="p-name">{{ patient.username }}</span>
+                    <span class="p-id">ID: {{ patient.id }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div class="card main-view">
+        <div class="welcome-msg">
+            <h2>Welcome, Dr. {{ current_user.username }}</h2>
+            <p>Select a patient from the directory to view real-time vitals and historical records.</p>
+        </div>
+        <!-- Placeholder for stats or recent alerts -->
+        <div class="stats-overview">
+            <div class="stat-box">
+                <h4>Total Patients</h4>
+                <span class="stat-val">{{ patients|length }}</span>
+            </div>
+            <div class="stat-box">
+                <h4>Critical Alerts</h4>
+                <span class="stat-val zero">0</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 250px 1fr;
+        gap: 1.5rem;
+    }
+
+    .sidebar h3 {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        margin-bottom: 1rem;
+    }
+
+    .patient-list {
+        list-style: none;
+    }
+
+    .patient-link {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.75rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        color: var(--text-primary);
+        text-decoration: none;
+        transition: background 0.2s;
+    }
+
+    .patient-link:hover {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .p-id {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
+
+    .welcome-msg {
+        margin-bottom: 2rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding-bottom: 2rem;
+    }
+
+    .stats-overview {
+        display: flex;
+        gap: 1rem;
+    }
+
+    .stat-box {
+        background: rgba(0, 0, 0, 0.2);
+        padding: 1rem;
+        border-radius: 8px;
+        min-width: 150px;
+    }
+
+    .stat-box h4 {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .stat-val {
+        font-size: 2rem;
+        font-weight: 700;
+    }
+
+    .stat-val.zero {
+        color: var(--success-color);
+    }
+</style>
+{% endblock %}

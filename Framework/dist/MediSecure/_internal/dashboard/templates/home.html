@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nurse Station | MediSecure</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>Medi<span class="highlight">Secure</span> Station</h1>
+                <p>Central Monitoring Unit</p>
+            </div>
+            <div class="status-indicator">
+                <span class="status connected">System Active</span>
+            </div>
+        </header>
+
+        <main>
+            <h2 class="section-title">Active Patients</h2>
+            <div id="patient-grid" class="vitals-grid">
+                <!-- Patient cards will be injected here -->
+                <div class="card empty-state">
+                    <p>Waiting for devices to connect...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const socket = io();
+        const patientGrid = document.getElementById('patient-grid');
+
+        socket.on('station_update', (msg) => {
+            const patients = msg.patients;
+            patientGrid.innerHTML = ''; // Clear current list
+
+            if (Object.keys(patients).length === 0) {
+                patientGrid.innerHTML = '<div class="card empty-state"><p>No active devices</p></div>';
+                return;
+            }
+
+            for (const [id, info] of Object.entries(patients)) {
+                const data = info.data;
+                const lastSeen = info.last_seen;
+                const now = Date.now() / 1000;
+                const isOnline = (now - lastSeen) < 5; // Online if seen in last 5 seconds
+
+                const card = document.createElement('a');
+                card.href = `/monitor/${id}`;
+                card.className = `card patient-summary-card ${isOnline ? '' : 'offline'}`;
+                card.innerHTML = `
+                    <div class="patient-header">
+                        <h3>${id}</h3>
+                        <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
+                    </div>
+                    <div class="patient-vitals">
+                        <div class="vital-item">
+                            <span class="label">HR</span>
+                            <span class="val">${data.hr || '--'}</span>
+                        </div>
+                        <div class="vital-item">
+                            <span class="label">SpO2</span>
+                            <span class="val">${data.spo2 || '--'}%</span>
+                        </div>
+                        <div class="vital-item">
+                            <span class="label">Temp</span>
+                            <span class="val">${data.temp || '--'}°C</span>
+                        </div>
+                    </div>
+                `;
+                patientGrid.appendChild(card);
+            }
+        });
+    </script>
+    <style>
+        .section-title {
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+        }
+
+        .patient-summary-card {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            cursor: pointer;
+            border: 1px solid rgba(56, 189, 248, 0.1);
+        }
+
+        .patient-summary-card:hover {
+            border-color: var(--accent-color);
+        }
+
+        .patient-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+
+        .status-dot.online {
+            background: var(--success-color);
+            box-shadow: 0 0 10px var(--success-color);
+        }
+
+        .patient-vitals {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .vital-item {
+            text-align: center;
+        }
+
+        .vital-item .label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .vital-item .val {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .offline {
+            opacity: 0.6;
+        }
+    </style>
+</body>
+
+</html>

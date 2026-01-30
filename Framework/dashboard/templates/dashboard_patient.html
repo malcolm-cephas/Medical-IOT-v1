@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Monitor{% endblock %}
+{% block subtitle %}Real-time Vitals{% endblock %}
+
+{% block content %}
+<div class="monitor-header">
+    <h2>Monitoring: <span class="highlight">{{ patient_id }}</span></h2>
+    <div class="status-indicator">
+        <span id="connection-status" class="status disconnected">Disconnected</span>
+    </div>
+</div>
+
+<!-- Vital Signs Grid -->
+<div class="vitals-grid">
+    <div class="card vital-card">
+        <div class="icon">❤️</div>
+        <div class="vital-info">
+            <h3>Heart Rate</h3>
+            <div class="value-unit">
+                <span id="hr-value" class="value">--</span>
+                <span class="unit">BPM</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card vital-card">
+        <div class="icon">💧</div>
+        <div class="vital-info">
+            <h3>SpO2</h3>
+            <div class="value-unit">
+                <span id="spo2-value" class="value">--</span>
+                <span class="unit">%</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card vital-card">
+        <div class="icon">🌡️</div>
+        <div class="vital-info">
+            <h3>Temperature</h3>
+            <div class="value-unit">
+                <span id="temp-value" class="value">--</span>
+                <span class="unit">°C</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card vital-card">
+        <div class="icon">☁️</div>
+        <div class="vital-info">
+            <h3>Humidity</h3>
+            <div class="value-unit">
+                <span id="hum-value" class="value">--</span>
+                <span class="unit">%</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ECG Chart -->
+<div class="card chart-card">
+    <div class="card-header">
+        <h2>Real-time ECG</h2>
+        <div class="live-badge">LIVE</div>
+    </div>
+    <div class="chart-container">
+        <canvas id="ecgChart"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const PATIENT_ID = "{{ patient_id }}";
+    const socket = io();
+
+    // DOM Elements
+    const hrValue = document.getElementById('hr-value');
+    const spo2Value = document.getElementById('spo2-value');
+    const tempValue = document.getElementById('temp-value');
+    const humValue = document.getElementById('hum-value');
+    const connectionStatus = document.getElementById('connection-status');
+
+    // Chart Configuration
+    const ctx = document.getElementById('ecgChart').getContext('2d');
+    const MAX_DATA_POINTS = 100;
+
+    const ecgChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array(MAX_DATA_POINTS).fill(''),
+            datasets: [{
+                label: 'ECG Signal',
+                data: Array(MAX_DATA_POINTS).fill(0),
+                borderColor: '#38bdf8',
+                borderWidth: 2,
+                tension: 0.4,
+                pointRadius: 0,
+                fill: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: { display: false },
+                y: {
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#94a3b8' },
+                    suggestedMin: 0,
+                    suggestedMax: 1024
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    socket.on('connect', () => {
+        connectionStatus.textContent = 'Connected';
+        connectionStatus.classList.remove('disconnected');
+        connectionStatus.classList.add('connected');
+    });
+
+    socket.on('sensor_update', (msg) => {
+        if (msg.patient_id !== PATIENT_ID) return;
+
+        const data = msg.data;
+        if (data.hr) hrValue.textContent = data.hr;
+        if (data.spo2) spo2Value.textContent = data.spo2;
+        if (data.temp) tempValue.textContent = data.temp.toFixed(1);
+        if (data.hum) humValue.textContent = data.hum.toFixed(1);
+
+        if (data.ecg !== undefined) {
+            const chartData = ecgChart.data.datasets[0].data;
+            chartData.shift();
+            chartData.push(data.ecg);
+            ecgChart.update();
+        }
+    });
+</script>
+<style>
+    .monitor-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+    }
+
+    .monitor-header h2 {
+        font-size: 1.5rem;
+    }
+</style>
+{% endblock %}
