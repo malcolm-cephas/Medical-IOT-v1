@@ -20,7 +20,7 @@ A decentralized, role-based health monitoring system connecting Arduino sensors 
 ### 2. Installation
 1.  Navigate to the project folder:
     ```bash
-    cd "d:\Malcolm\DSCE\Major Project\Framework"
+    cd "path"
     ```
 2.  Install dependencies:
     ```bash
