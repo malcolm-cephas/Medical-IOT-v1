@@ -6,8 +6,8 @@
 #include "DHT.h"
 
 // --- WiFi ---
-const char* ssid = "Edge 30 Pro";
-const char* password = "malcolmcep";
+const char* ssid = "enter your ssid";
+const char* password = "enter your password";
 
 // --- Server URL (replace with Raspberry Pi IP) ---
 const char* serverName = "http://172.17.201.62:5000/data";   // Flask server endpoint
