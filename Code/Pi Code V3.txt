@@ -1,0 +1,296 @@
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+import sqlite3
+import os
+from Crypto.PublicKey import ECC
+from Crypto.Signature import DSS
+from Crypto.Hash import SHA256
+from charm.toolbox.pairinggroup import PairingGroup
+from charm.schemes.abenc.abenc_bsw07 import CPabe_BSW07
+import hashlib
+
+app = Flask(__name__)
+app.secret_key = "supersecretkey"  # required for session management
+
+# ----------------------------
+#  Databases
+# ----------------------------
+USER_DB_FILE = 'users.db'
+DATA_DB_FILE = 'secure_health_data.db'
+
+def init_user_db():
+    conn = sqlite3.connect(USER_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def init_data_db():
+    conn = sqlite3.connect(DATA_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vitals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data BLOB,
+            signature BLOB,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# ----------------------------
+#  CP-ABE Setup
+# ----------------------------
+group = PairingGroup('SS512')
+cpabe = CPabe_BSW07(group)
+
+if not os.path.exists("master_key.pem"):
+    (master_public_key, master_key) = cpabe.setup()
+    with open("master_key.pem", "wb") as f:
+        f.write(master_key.serialize())
+    with open("public_key.pem", "wb") as f:
+        f.write(master_public_key.serialize())
+else:
+    with open("master_key.pem", "rb") as f:
+        master_key = cpabe.deserialize_master_key(f.read())
+    with open("public_key.pem", "rb") as f:
+        master_public_key = cpabe.deserialize_public_key(f.read())
+
+user_keys = {}  # will be filled at runtime from user roles
+
+# ----------------------------
+#  ECC Signing Setup
+# ----------------------------
+if not os.path.exists("ecc_key.pem"):
+    key = ECC.generate(curve='P-256')
+    with open("ecc_key.pem", "wt") as f:
+        f.write(key.export_key())
+else:
+    with open("ecc_key.pem", "rt") as f:
+        key = ECC.import_key(f.read())
+signer = DSS.new(key, 'fips-186-3')
+
+# ----------------------------
+#  User Authentication Routes
+# ----------------------------
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = hashlib.sha256(request.form['password'].encode()).hexdigest()
+        role = request.form['role']
+        try:
+            conn = sqlite3.connect(USER_DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)",
+                           (username, password, role))
+            conn.commit()
+            conn.close()
+            # generate CP-ABE key for the new user
+            sk = cpabe.keygen(master_public_key, master_key, [role])
+            user_keys[username] = sk
+            return redirect(url_for('login'))
+        except:
+            return "Username already exists"
+    return render_template_string('''
+        <h2>Signup</h2>
+        <form method="post">
+            Username: <input name="username"><br>
+            Password: <input name="password" type="password"><br>
+            Role: <select name="role">
+                <option value="Doctor">Doctor</option>
+                <option value="Admin">Admin</option>
+            </select><br>
+            <input type="submit" value="Signup">
+        </form>
+    ''')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = hashlib.sha256(request.form['password'].encode()).hexdigest()
+        conn = sqlite3.connect(USER_DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        user = cursor.fetchone()
+        conn.close()
+        if user:
+            session['username'] = username
+            session['role'] = user[3]  # role
+            # generate CP-ABE key if not exists
+            if username not in user_keys:
+                sk = cpabe.keygen(master_public_key, master_key, [user[3]])
+                user_keys[username] = sk
+            return redirect(url_for('dashboard', username=username))
+        return "Invalid credentials"
+    return render_template_string('''
+        <h2>Login</h2>
+        <form method="post">
+            Username: <input name="username"><br>
+            Password: <input name="password" type="password"><br>
+            <input type="submit" value="Login">
+        </form>
+    ''')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+# ----------------------------
+#  Receive IoT Data
+# ----------------------------
+@app.route('/data', methods=['POST'])
+def receive_data():
+    data = request.get_json()
+    if data:
+        plaintext = f"{data['temperature']},{data['humidity']},{data['heartrate']},{data['ecg']}"
+        policy = 'Doctor or Admin'
+        ciphertext = cpabe.encrypt(master_public_key, plaintext, policy)
+        h = SHA256.new(str(ciphertext).encode())
+        signature = signer.sign(h)
+        with sqlite3.connect(DATA_DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO vitals (data,signature) VALUES (?,?)",
+                           (str(ciphertext), signature))
+            conn.commit()
+        return "Encrypted & Stored", 200
+    return "Invalid data", 400
+
+# ----------------------------
+#  API: Latest 20 decrypted readings
+# ----------------------------
+@app.route('/api/latest/<username>')
+def api_latest(username):
+    if 'username' not in session or session['username'] != username:
+        return "Unauthorized", 403
+    sk = user_keys.get(username)
+    if not sk:
+        return "No key for user", 403
+    conn = sqlite3.connect(DATA_DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT timestamp,data,signature FROM vitals ORDER BY id DESC LIMIT 20")
+    rows = cursor.fetchall()
+    conn.close()
+    decrypted = []
+    for ts, ciphertext, signature in rows[::-1]:
+        try:
+            h = SHA256.new(str(ciphertext).encode())
+            verifier = DSS.new(key.public_key(), 'fips-186-3')
+            verifier.verify(h, signature)
+            plaintext = cpabe.decrypt(master_public_key, sk, eval(ciphertext))
+            temp, hum, hr, ecg = plaintext.split(',')
+            decrypted.append({"time": ts,"temperature":float(temp),"humidity":float(hum),"heartrate":float(hr),"ecg":int(ecg)})
+        except:
+            continue
+    return jsonify({"data": decrypted})
+
+# ----------------------------
+#  Dashboard
+# ----------------------------
+@app.route('/dashboard/<username>')
+def dashboard(username):
+    if 'username' not in session or session['username'] != username:
+        return redirect(url_for('login'))
+    return render_template_string("""
+<html>
+<head>
+<title>Secure Health Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial; margin: 20px; background: #f4f6f9; }
+h1 { text-align: center; color: #333; }
+.grid-container { display:grid; grid-template-columns:1fr 1fr; grid-gap:20px; margin-top:20px; }
+.chart-box { background:white; border:1px solid #ccc; border-radius:8px; padding:10px; }
+canvas { width:100% !important; height:300px !important; }
+table { width:100%; margin-top:30px; border-collapse:collapse; background:white; }
+th,td { border:1px solid #ccc; padding:8px; text-align:center; }
+th { background:#007BFF; color:white; }
+tr:nth-child(even) { background:#f9f9f9; }
+button { padding:10px 15px; margin-top:10px; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Secure Health Monitor - {{ username }}</h1>
+<button onclick="downloadCSV()">Download CSV</button>
+<div class="grid-container">
+<div class="chart-box"><canvas id="tempChart"></canvas></div>
+<div class="chart-box"><canvas id="humChart"></canvas></div>
+<div class="chart-box"><canvas id="hrChart"></canvas></div>
+<div class="chart-box"><canvas id="ecgChart"></canvas></div>
+</div>
+<h2>Last 10 Readings</h2>
+<table id="dataTable"><tr><th>Time</th><th>Temp</th><th>Humidity</th><th>HR</th><th>ECG</th></tr></table>
+<script>
+let tempChart, humChart, hrChart, ecgChart;
+async function fetchData() {
+    const response = await fetch('/api/latest/{{ username }}?nocache='+new Date().getTime());
+    const json = await response.json();
+    return json.data;
+}
+function initCharts(labels, temps, hums, hrs, ecgs) {
+    const opts={responsive:true, animation:false, scales:{x:{display:false}, y:{beginAtZero:false}}};
+    tempChart=new Chart(document.getElementById('tempChart'),{type:'line', data:{labels,datasets:[{label:'Temp (°C)',data:temps,borderColor:'orange',fill:false}]}, options:opts});
+    humChart=new Chart(document.getElementById('humChart'),{type:'line', data:{labels,datasets:[{label:'Humidity (%)',data:hums,borderColor:'green',fill:false}]}, options:opts});
+    hrChart=new Chart(document.getElementById('hrChart'),{type:'line', data:{labels,datasets:[{label:'Heart Rate (BPM)',data:hrs,borderColor:'red',fill:false}]}, options:opts});
+    ecgChart=new Chart(document.getElementById('ecgChart'),{type:'line', data:{labels,datasets:[{label:'ECG',data:ecgs,borderColor:'blue',fill:false}]}, options:opts});
+}
+function updateCharts(data){
+    const labels=data.map(d=>d.time), temps=data.map(d=>d.temperature), hums=data.map(d=>d.humidity),
+          hrs=data.map(d=>d.heartrate), ecgs=data.map(d=>d.ecg);
+    tempChart.data.labels=labels; tempChart.data.datasets[0].data=temps;
+    humChart.data.labels=labels; humChart.data.datasets[0].data=hums;
+    hrChart.data.labels=labels; hrChart.data.datasets[0].data=hrs;
+    ecgChart.data.labels=labels; ecgChart.data.datasets[0].data=ecgs;
+    tempChart.update('none'); humChart.update('none'); hrChart.update('none'); ecgChart.update('none');
+    let table=document.getElementById("dataTable");
+    let rows=`<tr><th>Time</th><th>Temp</th><th>Humidity</th><th>HR</th><th>ECG</th></tr>`;
+    data.slice(-10).reverse().forEach(d=>{
+        rows+=`<tr><td>${d.time}</td><td>${d.temperature.toFixed(1)}</td><td>${d.humidity.toFixed(1)}</td><td>${d.heartrate.toFixed(1)}</td><td>${d.ecg}</td></tr>`;
+    });
+    table.innerHTML=rows;
+}
+async function refreshDashboard(){
+    const data=await fetchData();
+    const labels=data.map(d=>d.time), temps=data.map(d=>d.temperature), hums=data.map(d=>d.humidity),
+          hrs=data.map(d=>d.heartrate), ecgs=data.map(d=>d.ecg);
+    initCharts(labels, temps, hums, hrs, ecgs);
+    updateCharts(data);
+    setInterval(async ()=>{
+        const newData=await fetchData();
+        updateCharts(newData);
+    },3000);
+}
+async function downloadCSV(){
+    const data=await fetchData();
+    let csv="data:text/csv;charset=utf-8,Timestamp,Temperature,Humidity,HeartRate,ECG\\n";
+    data.forEach(d=>{
+        csv+=`${d.time},${d.temperature},${d.humidity},${d.heartrate},${d.ecg}\\n`;
+    });
+    const encodedUri=encodeURI(csv);
+    const link=document.createElement("a");
+    link.setAttribute("href",encodedUri);
+    link.setAttribute("download","health_data_{{ username }}.csv");
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+refreshDashboard();
+</script>
+</body>
+</html>
+""", username=username)
+
+# ----------------------------
+#  Run Flask
+# ----------------------------
+if __name__ == '__main__':
+    init_user_db()
+    init_data_db()
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,0 +1,232 @@
+from flask import Flask, request, jsonify
+import sqlite3
+
+app = Flask(__name__)
+
+# ----------------------------------------------------
+#  Database Setup
+# ----------------------------------------------------
+def init_db():
+    conn = sqlite3.connect('health_data.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS vitals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        temperature REAL,
+                        humidity REAL,
+                        heartrate REAL,
+                        ecg INTEGER,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.commit()
+    conn.close()
+
+# ----------------------------------------------------
+#  Receive data from Arduino UNO R4 WiFi
+# ----------------------------------------------------
+@app.route('/data', methods=['POST'])
+def receive_data():
+    data = request.get_json()
+    print("Received:", data)  # Debug line (shows in Pi terminal)
+
+    if data:
+        temp = data.get("temperature")
+        hum  = data.get("humidity")
+        hr   = data.get("heartrate")
+        ecg  = data.get("ecg")
+
+        if None in (temp, hum, hr, ecg):
+            return "Missing data field", 400
+
+        conn = sqlite3.connect('health_data.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO vitals (temperature, humidity, heartrate, ecg) VALUES (?, ?, ?, ?)",
+                       (temp, hum, hr, ecg))
+        conn.commit()
+        conn.close()
+        return "Data stored successfully", 200
+    return "Invalid data", 400
+
+# ----------------------------------------------------
+#  API for latest 50 readings (used by dashboard)
+# ----------------------------------------------------
+@app.route('/api/latest')
+def api_latest():
+    conn = sqlite3.connect('health_data.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT timestamp, temperature, humidity, heartrate, ecg FROM vitals ORDER BY id DESC LIMIT 50")
+    rows = cursor.fetchall()
+    conn.close()
+
+    data = [{"time": r[0], "temperature": r[1], "humidity": r[2],
+             "heartrate": r[3], "ecg": r[4]} for r in rows[::-1]]
+    return jsonify({"data": data})
+
+# ----------------------------------------------------
+#  Live Updating Web Dashboard
+# ----------------------------------------------------
+@app.route('/')
+def index():
+    return """
+    <html>
+    <head>
+        <title>Live Health Monitor Dashboard</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f9; }
+            h1 { color: #333; text-align: center; }
+            .grid-container {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                grid-gap: 20px;
+                margin-top: 20px;
+            }
+            .chart-box {
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 8px;
+                padding: 10px;
+                box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
+            }
+            canvas { width: 100% !important; height: 300px !important; }
+            table {
+                width: 100%;
+                margin-top: 30px;
+                border-collapse: collapse;
+                background: white;
+                box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
+            }
+            th, td {
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: center;
+            }
+            th { background: #007BFF; color: white; }
+            tr:nth-child(even) { background: #f9f9f9; }
+        </style>
+    </head>
+    <body>
+        <h1>Live Health Monitor</h1>
+
+        <div class="grid-container">
+            <div class="chart-box"><canvas id="tempChart"></canvas></div>
+            <div class="chart-box"><canvas id="humChart"></canvas></div>
+            <div class="chart-box"><canvas id="hrChart"></canvas></div>
+            <div class="chart-box"><canvas id="ecgChart"></canvas></div>
+        </div>
+
+        <h2>Latest 10 Readings</h2>
+        <table id="dataTable">
+            <tr>
+                <th>Time</th>
+                <th>Temp (Â°C)</th>
+                <th>Humidity (%)</th>
+                <th>Heart Rate (BPM)</th>
+                <th>ECG</th>
+            </tr>
+        </table>
+
+        <script>
+        let tempChart, humChart, hrChart, ecgChart;
+
+        async function fetchData() {
+            const response = await fetch('/api/latest?nocache=' + new Date().getTime());
+            const json = await response.json();
+            return json.data;
+        }
+
+        function initCharts(labels, temps, hums, hrs, ecgs) {
+            const commonOptions = {responsive: true, animation: false,
+                scales: {x: {display: false}, y: {beginAtZero: false}}};
+
+            tempChart = new Chart(document.getElementById('tempChart'), {
+                type: 'line',
+                data: {labels, datasets:[{label:'Temperature (Â°C)', data:temps, borderColor:'orange', fill:false}]},
+                options: commonOptions
+            });
+            humChart = new Chart(document.getElementById('humChart'), {
+                type: 'line',
+                data: {labels, datasets:[{label:'Humidity (%)', data:hums, borderColor:'green', fill:false}]},
+                options: commonOptions
+            });
+            hrChart = new Chart(document.getElementById('hrChart'), {
+                type: 'line',
+                data: {labels, datasets:[{label:'Heart Rate (BPM)', data:hrs, borderColor:'red', fill:false}]},
+                options: commonOptions
+            });
+            ecgChart = new Chart(document.getElementById('ecgChart'), {
+                type: 'line',
+                data: {labels, datasets:[{label:'ECG Signal', data:ecgs, borderColor:'blue', fill:false}]},
+                options: commonOptions
+            });
+        }
+
+        function updateCharts(data) {
+            const labels = data.map(d => d.time);
+            const temps  = data.map(d => d.temperature);
+            const hums   = data.map(d => d.humidity);
+            const hrs    = data.map(d => d.heartrate);
+            const ecgs   = data.map(d => d.ecg);
+
+            tempChart.data.labels = labels;
+            tempChart.data.datasets[0].data = temps;
+            humChart.data.labels = labels;
+            humChart.data.datasets[0].data = hums;
+            hrChart.data.labels = labels;
+            hrChart.data.datasets[0].data = hrs;
+            ecgChart.data.labels = labels;
+            ecgChart.data.datasets[0].data = ecgs;
+
+            tempChart.update('none');
+            humChart.update('none');
+            hrChart.update('none');
+            ecgChart.update('none');
+
+            let table = document.getElementById("dataTable");
+            let rows = `
+                <tr>
+                    <th>Time</th>
+                    <th>Temp (Â°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Heart Rate (BPM)</th>
+                    <th>ECG</th>
+                </tr>`;
+            data.slice(-10).reverse().forEach(d => {
+                rows += `<tr>
+                    <td>${d.time}</td>
+                    <td>${d.temperature.toFixed(1)}</td>
+                    <td>${d.humidity.toFixed(1)}</td>
+                    <td>${d.heartrate.toFixed(1)}</td>
+                    <td>${d.ecg}</td>
+                </tr>`;
+            });
+            table.innerHTML = rows;
+        }
+
+        async function startDashboard() {
+            const data = await fetchData();
+            const labels = data.map(d => d.time);
+            const temps  = data.map(d => d.temperature);
+            const hums   = data.map(d => d.humidity);
+            const hrs    = data.map(d => d.heartrate);
+            const ecgs   = data.map(d => d.ecg);
+            initCharts(labels, temps, hums, hrs, ecgs);
+            updateCharts(data);
+
+            // Auto-refresh every 3 seconds (no manual reload)
+            setInterval(async () => {
+                const newData = await fetchData();
+                updateCharts(newData);
+            }, 3000);
+        }
+
+        startDashboard();
+        </script>
+    </body>
+    </html>
+    """
+
+# ----------------------------------------------------
+#  Main
+# ----------------------------------------------------
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=5000, debug=True)
