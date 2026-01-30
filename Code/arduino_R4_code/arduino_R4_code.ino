@@ -16,8 +16,8 @@
 #define LO_MINUS 6
 
 // ---------- WiFi Credentials ----------
-char ssid[] = "Edge 30 Pro";      // <-- Change this
-char pass[] = "malcolmcep";  // <-- Change this
+char ssid[] = "Enter your username";      // <-- Change this
+char pass[] = "Enter your password";  // <-- Change this
 
 // ---------- Server Info ----------
 char serverAddress[] = "10.159.251.149";   // <-- Raspberry Pi IP
